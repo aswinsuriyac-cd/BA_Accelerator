@@ -389,6 +389,20 @@ async def approve_workflow(
     return WorkflowDecisionResponse(workflow_id=updated.id, status=updated.status, comments=request.comments)
 
 
+@router.post("/workflows/{workflow_id}/request-changes", response_model=WorkflowDecisionResponse)
+async def request_changes_workflow(
+    workflow_id: str,
+    request: WorkflowDecisionRequest,
+    db: Session = Depends(get_db),
+):
+    workflow = get_workflow_or_404(db, workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found.")
+
+    updated = update_workflow_status(db, workflow, "ba_changes_requested", request.comments)
+    return WorkflowDecisionResponse(workflow_id=updated.id, status=updated.status, comments=request.comments)
+
+
 @router.post("/workflows/{workflow_id}/manual-review", response_model=WorkflowDecisionResponse)
 async def mark_manual_review(
     workflow_id: str,
@@ -430,7 +444,7 @@ async def create_export_from_workflow(
     if workflow is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found.")
 
-    if workflow.status not in {"approved", "ba_approved", "needs_manual_review", "generated"}:
+    if workflow.status not in {"pending_ba_review", "ba_approved", "needs_manual_review", "generated", "ba_changes_requested"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Workflow status '{workflow.status}' is not exportable.",

@@ -25,9 +25,9 @@ class CriticOutput(BaseModel):
 
 
 class WorkflowReviewOutput(BaseModel):
-    review_status: Literal["approved", "needs_manual_review"] = Field(
+    review_status: Literal["pending_ba_review", "needs_manual_review"] = Field(
         ...,
-        description="Final orchestrator status after critic review and any retries."
+        description="Final machine-review status after critic review and any retries."
     )
     refine_attempts: int = Field(
         ...,

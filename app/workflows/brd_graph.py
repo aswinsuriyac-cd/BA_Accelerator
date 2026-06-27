@@ -26,7 +26,7 @@ class WorkflowState(TypedDict):
     critic_history: NotRequired[list[CriticOutput]]
     refine_attempts: NotRequired[int]
     max_refine_attempts: NotRequired[int]
-    review_status: NotRequired[Literal["approved", "needs_manual_review"] | None]
+    review_status: NotRequired[Literal["pending_ba_review", "needs_manual_review"] | None]
     recommended_next_steps: NotRequired[list[str]]
     errors: NotRequired[list[str]]
 
@@ -130,8 +130,8 @@ def critic_review_node(state: WorkflowState) -> dict:
     }
 
     if critic_output.verdict == "pass":
-        updates["review_status"] = "approved"
-        updates["recommended_next_steps"] = []
+        updates["review_status"] = "pending_ba_review"
+        updates["recommended_next_steps"] = ["Submit the reviewed story package to the BA for final approval."]
         return updates
 
     refine_attempts = state.get("refine_attempts", 0) + 1
