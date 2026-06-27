@@ -1,10 +1,18 @@
 import json
-from pathlib import Path
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.workflow import Artifact, Document, ExportedFile, ReviewAttempt, Workflow
 from app.schemas.review_schema import WorkflowReviewOutput
+from app.schemas.workflow_schema import (
+    ArtifactRecord,
+    DocumentRecord,
+    ExportRecord,
+    ReviewAttemptRecord,
+    WorkflowDetail,
+    WorkflowSummary,
+)
 from app.services.storage_service import save_export, save_upload
 from app.workflows.brd_graph import WorkflowState, build_review_output
 
@@ -165,3 +173,109 @@ def build_persisted_generation(
         status=state.get("review_status") or "generated",
     )
     return persist_workflow_state(db, workflow, state)
+
+
+def list_workflows(db: Session, limit: int = 50) -> list[Workflow]:
+    stmt = select(Workflow).order_by(Workflow.created_at.desc()).limit(limit)
+    return list(db.scalars(stmt))
+
+
+def get_workflow_or_404(db: Session, workflow_id: str) -> Workflow | None:
+    stmt = (
+        select(Workflow)
+        .options(
+            joinedload(Workflow.document),
+            joinedload(Workflow.artifacts),
+            joinedload(Workflow.reviews),
+            joinedload(Workflow.exports),
+        )
+        .where(Workflow.id == workflow_id)
+    )
+    return db.execute(stmt).unique().scalar_one_or_none()
+
+
+def workflow_to_summary(workflow: Workflow) -> WorkflowSummary:
+    return WorkflowSummary(
+        id=workflow.id,
+        status=workflow.status,
+        target_stage=workflow.target_stage,
+        refine_attempts=workflow.refine_attempts,
+        max_refine_attempts=workflow.max_refine_attempts,
+        document_id=workflow.document_id,
+        created_at=workflow.created_at,
+        updated_at=workflow.updated_at,
+    )
+
+
+def workflow_to_detail(workflow: Workflow) -> WorkflowDetail:
+    document = None
+    if workflow.document is not None:
+        document = DocumentRecord(
+            id=workflow.document.id,
+            source_type=workflow.document.source_type,
+            original_filename=workflow.document.original_filename,
+            media_type=workflow.document.media_type,
+            storage_path=workflow.document.storage_path,
+            parsed_text=workflow.document.parsed_text,
+            created_at=workflow.document.created_at,
+        )
+
+    artifacts = [
+        ArtifactRecord(
+            id=artifact.id,
+            artifact_type=artifact.artifact_type,
+            content_json=artifact.content_json,
+            created_at=artifact.created_at,
+        )
+        for artifact in sorted(workflow.artifacts, key=lambda item: item.created_at)
+    ]
+    reviews = [
+        ReviewAttemptRecord(
+            id=review.id,
+            attempt_number=review.attempt_number,
+            verdict=review.verdict,
+            summary=review.summary,
+            issues=json.loads(review.issues_json or "[]"),
+            revision_instructions=json.loads(review.revision_instructions_json or "[]"),
+            created_at=review.created_at,
+        )
+        for review in sorted(workflow.reviews, key=lambda item: item.attempt_number)
+    ]
+    exports = [
+        ExportRecord(
+            id=export.id,
+            export_format=export.export_format,
+            storage_path=export.storage_path,
+            created_at=export.created_at,
+        )
+        for export in sorted(workflow.exports, key=lambda item: item.created_at)
+    ]
+
+    summary = workflow_to_summary(workflow)
+    return WorkflowDetail(
+        **summary.model_dump(),
+        document=document,
+        artifacts=artifacts,
+        reviews=reviews,
+        exports=exports,
+    )
+
+
+def update_workflow_status(db: Session, workflow: Workflow, status: str, comments: str | None = None) -> Workflow:
+    workflow.status = status
+    if comments:
+        db.add(
+            Artifact(
+                workflow=workflow,
+                artifact_type="ba_decision",
+                content_json=json.dumps({"status": status, "comments": comments}),
+            )
+        )
+    db.commit()
+    db.refresh(workflow)
+    return workflow
+
+
+def get_export_or_404(db: Session, workflow_id: str, export_id: str) -> ExportedFile | None:
+    stmt = select(ExportedFile).where(ExportedFile.workflow_id == workflow_id, ExportedFile.id == export_id)
+    return db.scalar(stmt)

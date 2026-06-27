@@ -4,7 +4,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Response, status
 from pydantic import BaseModel, Field
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -12,10 +12,22 @@ from app.schemas.generator_schema import GeneratorOutput
 from app.schemas.review_schema import WorkflowReviewOutput
 from app.schemas.router_schema import RouterOutput
 from app.schemas.specialist_schema import SpecialistOutput
+from app.schemas.workflow_schema import (
+    WorkflowDecisionRequest,
+    WorkflowDecisionResponse,
+    WorkflowDetail,
+    WorkflowSummary,
+)
 from app.services.persistence_service import (
     build_persisted_generation,
     build_persisted_review,
+    get_export_or_404,
+    get_workflow_or_404,
+    list_workflows,
     persist_export_record,
+    update_workflow_status,
+    workflow_to_detail,
+    workflow_to_summary,
 )
 from app.services.export_service import build_export_bytes, export_media_type
 from app.workflows.brd_graph import build_review_output
@@ -346,3 +358,62 @@ async def review_user_story_file(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred during file-based critic review: {str(e)}"
         )
+
+
+@router.get("/workflows", response_model=list[WorkflowSummary])
+async def get_workflows(limit: int = 50, db: Session = Depends(get_db)):
+    workflows = list_workflows(db, limit=limit)
+    return [workflow_to_summary(workflow) for workflow in workflows]
+
+
+@router.get("/workflows/{workflow_id}", response_model=WorkflowDetail)
+async def get_workflow(workflow_id: str, db: Session = Depends(get_db)):
+    workflow = get_workflow_or_404(db, workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found.")
+    return workflow_to_detail(workflow)
+
+
+@router.post("/workflows/{workflow_id}/approve", response_model=WorkflowDecisionResponse)
+async def approve_workflow(
+    workflow_id: str,
+    request: WorkflowDecisionRequest,
+    db: Session = Depends(get_db),
+):
+    workflow = get_workflow_or_404(db, workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found.")
+
+    updated = update_workflow_status(db, workflow, "ba_approved", request.comments)
+    return WorkflowDecisionResponse(workflow_id=updated.id, status=updated.status, comments=request.comments)
+
+
+@router.post("/workflows/{workflow_id}/manual-review", response_model=WorkflowDecisionResponse)
+async def mark_manual_review(
+    workflow_id: str,
+    request: WorkflowDecisionRequest,
+    db: Session = Depends(get_db),
+):
+    workflow = get_workflow_or_404(db, workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found.")
+
+    updated = update_workflow_status(db, workflow, "needs_manual_review", request.comments)
+    return WorkflowDecisionResponse(workflow_id=updated.id, status=updated.status, comments=request.comments)
+
+
+@router.get("/workflows/{workflow_id}/exports/{export_id}")
+async def download_saved_export(workflow_id: str, export_id: str, db: Session = Depends(get_db)):
+    export = get_export_or_404(db, workflow_id, export_id)
+    if export is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export not found.")
+
+    export_path = Path(export.storage_path)
+    if not export_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export file missing from storage.")
+
+    return FileResponse(
+        path=export_path,
+        media_type=export_media_type(export.export_format),  # type: ignore[arg-type]
+        filename=export_path.name,
+    )
