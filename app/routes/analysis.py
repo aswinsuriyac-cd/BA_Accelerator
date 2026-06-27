@@ -22,6 +22,7 @@ from app.services.persistence_service import (
     build_persisted_generation,
     build_persisted_review,
     get_export_or_404,
+    get_latest_generator_output,
     get_workflow_or_404,
     list_workflows,
     persist_export_record,
@@ -416,4 +417,46 @@ async def download_saved_export(workflow_id: str, export_id: str, db: Session = 
         path=export_path,
         media_type=export_media_type(export.export_format),  # type: ignore[arg-type]
         filename=export_path.name,
+    )
+
+
+@router.post("/workflows/{workflow_id}/exports")
+async def create_export_from_workflow(
+    workflow_id: str,
+    output_format: Literal["xlsx", "docx", "pdf"] = "xlsx",
+    db: Session = Depends(get_db),
+):
+    workflow = get_workflow_or_404(db, workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found.")
+
+    if workflow.status not in {"approved", "ba_approved", "needs_manual_review", "generated"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Workflow status '{workflow.status}' is not exportable.",
+        )
+
+    generator_output = get_latest_generator_output(workflow)
+    if generator_output is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No persisted generator output found for this workflow.",
+        )
+
+    base_name = workflow.document.original_filename if workflow.document and workflow.document.original_filename else workflow.id
+    payload = build_export_bytes(generator_output, output_format)
+    file_name = f"{Path(base_name).stem}.{output_format}"
+    exported = persist_export_record(
+        db,
+        workflow,
+        output_format=output_format,
+        file_name=file_name,
+        content=payload,
+    )
+    return _build_export_response(
+        generator_output,
+        output_format,
+        Path(base_name).stem,
+        payload=payload,
+        workflow_id=workflow.id,
     )

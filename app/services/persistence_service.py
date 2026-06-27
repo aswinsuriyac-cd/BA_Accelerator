@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.workflow import Artifact, Document, ExportedFile, ReviewAttempt, Workflow
+from app.schemas.generator_schema import GeneratorOutput
 from app.schemas.review_schema import WorkflowReviewOutput
 from app.schemas.workflow_schema import (
     ArtifactRecord,
@@ -279,3 +280,12 @@ def update_workflow_status(db: Session, workflow: Workflow, status: str, comment
 def get_export_or_404(db: Session, workflow_id: str, export_id: str) -> ExportedFile | None:
     stmt = select(ExportedFile).where(ExportedFile.workflow_id == workflow_id, ExportedFile.id == export_id)
     return db.scalar(stmt)
+
+
+def get_latest_generator_output(workflow: Workflow) -> GeneratorOutput | None:
+    generator_artifacts = [artifact for artifact in workflow.artifacts if artifact.artifact_type == "generator_output"]
+    if not generator_artifacts:
+        return None
+
+    latest = max(generator_artifacts, key=lambda item: item.created_at)
+    return GeneratorOutput.model_validate_json(latest.content_json)
