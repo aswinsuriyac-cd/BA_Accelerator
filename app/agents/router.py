@@ -32,7 +32,14 @@ class RouterAgent:
         prompt = (
             "Analyze the following raw Business Requirement Document (BRD) and classify its core intent, "
             "determine the type of request, assess your confidence in the classification, and identify "
-            "any logical ambiguities or missing details in the description.\n\n"
+            "any logical ambiguities or missing details in the description. Also choose the best downstream "
+            "specialist agent for the next step.\n\n"
+            "Return JSON with exactly these fields:\n"
+            "- brd_type: short snake_case label such as feature_request, bug_fix, refactor, integration, migration, or other\n"
+            "- confidence: number from 0.0 to 1.0\n"
+            "- extracted_intent: concise summary of the main business need\n"
+            "- ambiguities: array of unresolved questions, conflicts, or missing details\n"
+            "- suggested_specialist: downstream specialist label; usually the same as brd_type unless a more specific specialist is justified\n\n"
             f"--- RAW BRD START ---\n{raw_brd_text}\n--- RAW BRD END ---"
         )
 
@@ -43,7 +50,8 @@ class RouterAgent:
             system_instruction=(
                 "You are an expert technical product manager and business analyst. "
                 "You meticulously parse requirement documents, identify what they are asking for (e.g. features, bug fixes), "
-                "and find any missing requirements, ambiguities, or contradictions that need clarification."
+                "and find any missing requirements, ambiguities, or contradictions that need clarification. "
+                "Your output is consumed by downstream agents, so the JSON must be concise, deterministic, and actionable."
             )
         )
 
