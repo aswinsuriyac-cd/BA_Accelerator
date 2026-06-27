@@ -2,14 +2,21 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, status
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 
+from app.db.session import get_db
 from app.schemas.generator_schema import GeneratorOutput
 from app.schemas.review_schema import WorkflowReviewOutput
 from app.schemas.router_schema import RouterOutput
 from app.schemas.specialist_schema import SpecialistOutput
+from app.services.persistence_service import (
+    build_persisted_generation,
+    build_persisted_review,
+    persist_export_record,
+)
 from app.services.export_service import build_export_bytes, export_media_type
 from app.workflows.brd_graph import build_review_output
 from app.workflows.brd_graph import run_graph_for_file, run_graph_for_text
@@ -25,10 +32,18 @@ def _safe_export_basename(name: str) -> str:
     return normalized or "user_stories"
 
 
-def _build_export_response(output: GeneratorOutput, output_format: Literal["xlsx", "docx", "pdf"], base_name: str):
-    payload = build_export_bytes(output, output_format)
+def _build_export_response(
+    output: GeneratorOutput,
+    output_format: Literal["xlsx", "docx", "pdf"],
+    base_name: str,
+    payload: bytes | None = None,
+    workflow_id: str | None = None,
+):
+    payload = payload or build_export_bytes(output, output_format)
     file_name = f"{_safe_export_basename(base_name)}.{output_format}"
     headers = {"Content-Disposition": f'attachment; filename="{file_name}"'}
+    if workflow_id:
+        headers["X-Workflow-Id"] = workflow_id
     return StreamingResponse(iter([payload]), media_type=export_media_type(output_format), headers=headers)
 
 @router.post("/route/text", response_model=RouterOutput)
@@ -113,12 +128,19 @@ async def analyze_specialist_file(file: UploadFile = File(...)):
 
 
 @router.post("/generate/text", response_model=GeneratorOutput)
-async def generate_user_story_text(request: TextAnalysisRequest):
+async def generate_user_story_text(request: TextAnalysisRequest, response: Response, db: Session = Depends(get_db)):
     """
     Analyze raw BRD text through router, specialist, and generator stages.
     """
     try:
         result = run_graph_for_text(request.raw_text, target_stage="generate")
+        workflow = build_persisted_generation(
+            db,
+            raw_text=request.raw_text,
+            state=result,
+            source_type="text",
+        )
+        response.headers["X-Workflow-Id"] = workflow.id
         return result["generator_output"]
     except ValueError as ve:
         raise HTTPException(
@@ -133,13 +155,28 @@ async def generate_user_story_text(request: TextAnalysisRequest):
 
 
 @router.post("/generate/file", response_model=GeneratorOutput)
-async def generate_user_story_file(file: UploadFile = File(...)):
+async def generate_user_story_file(
+    file: UploadFile = File(...),
+    response: Response = None,
+    db: Session = Depends(get_db),
+):
     """
     Upload a BRD file to parse it, classify it, structure it, and generate a user story.
     """
     try:
         content = await file.read()
         result = run_graph_for_file(file.filename, content, target_stage="generate")
+        workflow = build_persisted_generation(
+            db,
+            raw_text=result["raw_text"],
+            state=result,
+            original_filename=file.filename,
+            media_type=file.content_type,
+            file_bytes=content,
+            source_type="upload",
+        )
+        if response is not None:
+            response.headers["X-Workflow-Id"] = workflow.id
         return result["generator_output"]
     except ValueError as ve:
         raise HTTPException(
@@ -157,13 +194,35 @@ async def generate_user_story_file(file: UploadFile = File(...)):
 async def export_user_story_text(
     request: TextAnalysisRequest,
     output_format: Literal["xlsx", "docx", "pdf"] = "xlsx",
+    db: Session = Depends(get_db),
 ):
     """
     Generate user stories from raw BRD text and return them as a downloadable file.
     """
     try:
         result = run_graph_for_text(request.raw_text, target_stage="generate")
-        return _build_export_response(result["generator_output"], output_format, "generated_user_stories")
+        workflow = build_persisted_generation(
+            db,
+            raw_text=request.raw_text,
+            state=result,
+            source_type="text",
+        )
+        payload = build_export_bytes(result["generator_output"], output_format)
+        file_name = f"generated_user_stories.{output_format}"
+        persist_export_record(
+            db,
+            workflow,
+            output_format=output_format,
+            file_name=file_name,
+            content=payload,
+        )
+        return _build_export_response(
+            result["generator_output"],
+            output_format,
+            "generated_user_stories",
+            payload=payload,
+            workflow_id=workflow.id,
+        )
     except ValueError as ve:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -180,6 +239,7 @@ async def export_user_story_text(
 async def export_user_story_file(
     file: UploadFile = File(...),
     output_format: Literal["xlsx", "docx", "pdf"] = "xlsx",
+    db: Session = Depends(get_db),
 ):
     """
     Generate user stories from an uploaded BRD file and return them as a downloadable file.
@@ -188,7 +248,31 @@ async def export_user_story_file(
         content = await file.read()
         result = run_graph_for_file(file.filename, content, target_stage="generate")
         base_name = Path(file.filename or "generated_user_stories").stem
-        return _build_export_response(result["generator_output"], output_format, base_name)
+        workflow = build_persisted_generation(
+            db,
+            raw_text=result["raw_text"],
+            state=result,
+            original_filename=file.filename,
+            media_type=file.content_type,
+            file_bytes=content,
+            source_type="upload",
+        )
+        payload = build_export_bytes(result["generator_output"], output_format)
+        file_name = f"{base_name}.{output_format}"
+        persist_export_record(
+            db,
+            workflow,
+            output_format=output_format,
+            file_name=file_name,
+            content=payload,
+        )
+        return _build_export_response(
+            result["generator_output"],
+            output_format,
+            base_name,
+            payload=payload,
+            workflow_id=workflow.id,
+        )
     except ValueError as ve:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -202,13 +286,20 @@ async def export_user_story_file(
 
 
 @router.post("/review/text", response_model=WorkflowReviewOutput)
-async def review_user_story_text(request: TextAnalysisRequest):
+async def review_user_story_text(request: TextAnalysisRequest, response: Response, db: Session = Depends(get_db)):
     """
     Run the full pipeline through critic review with capped refinements.
     """
     try:
         result = run_graph_for_text(request.raw_text, target_stage="review")
-        return build_review_output(result)
+        review_output, workflow = build_persisted_review(
+            db,
+            raw_text=request.raw_text,
+            state=result,
+            source_type="text",
+        )
+        response.headers["X-Workflow-Id"] = workflow.id
+        return review_output
     except ValueError as ve:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -222,14 +313,29 @@ async def review_user_story_text(request: TextAnalysisRequest):
 
 
 @router.post("/review/file", response_model=WorkflowReviewOutput)
-async def review_user_story_file(file: UploadFile = File(...)):
+async def review_user_story_file(
+    file: UploadFile = File(...),
+    response: Response = None,
+    db: Session = Depends(get_db),
+):
     """
     Upload a BRD file and run the full pipeline through critic review with capped refinements.
     """
     try:
         content = await file.read()
         result = run_graph_for_file(file.filename, content, target_stage="review")
-        return build_review_output(result)
+        review_output, workflow = build_persisted_review(
+            db,
+            raw_text=result["raw_text"],
+            state=result,
+            original_filename=file.filename,
+            media_type=file.content_type,
+            file_bytes=content,
+            source_type="upload",
+        )
+        if response is not None:
+            response.headers["X-Workflow-Id"] = workflow.id
+        return review_output
     except ValueError as ve:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

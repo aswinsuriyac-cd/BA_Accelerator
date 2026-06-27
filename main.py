@@ -3,6 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import analysis
 from app.config import settings
+from app.db.session import init_db
+from app.services.storage_service import ensure_storage_dirs
 
 app = FastAPI(
     title="BA Accelerator Backend",
@@ -21,6 +23,12 @@ app.add_middleware(
 
 # Register routes
 app.include_router(analysis.router)
+
+
+@app.on_event("startup")
+def startup_event():
+    init_db()
+    ensure_storage_dirs()
 
 @app.get("/health")
 def health_check():

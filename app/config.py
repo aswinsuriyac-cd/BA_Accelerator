@@ -3,6 +3,8 @@ from typing import Optional
 
 class Settings(BaseSettings):
     gemini_api_key: Optional[str] = None
+    database_url: str = "sqlite:///./ba_accelerator.db"
+    storage_root: str = "storage"
     port: int = 8000
     host: str = "0.0.0.0"
     model_name: str = "gemini-2.5-flash"
