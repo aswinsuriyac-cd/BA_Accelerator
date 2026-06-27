@@ -30,6 +30,8 @@ class GeneratorAgent:
         raw_brd_text: str,
         router_output: RouterOutput,
         specialist_output: SpecialistOutput,
+        revision_instructions: list[str] | None = None,
+        refine_attempts: int = 0,
     ) -> GeneratorOutput:
         """
         Transform structured requirements into a user story package ready for review.
@@ -65,6 +67,8 @@ class GeneratorAgent:
             "- Put constraints like out-of-scope notes, compliance mandates, or rollout limitations into business_rules when relevant\n"
             "- Put prerequisites like credentials, third-party integrations, stakeholder approvals, or design assets into dependencies when relevant\n"
             "- Do not invent links or IDs beyond the requested story IDs\n\n"
+            f"Current refinement attempt: {refine_attempts}\n"
+            f"Revision instructions from critic: {revision_instructions or []}\n\n"
             f"Router classification:\n{router_output.model_dump_json(indent=2)}\n\n"
             f"Specialist output:\n{specialist_output.model_dump_json(indent=2)}\n\n"
             f"--- RAW BRD START ---\n{raw_brd_text}\n--- RAW BRD END ---"
@@ -78,7 +82,8 @@ class GeneratorAgent:
                 "You are a senior business analyst producing delivery-ready user story sheets. "
                 "Convert structured requirements into clear, implementation-ready story rows for engineering, QA, and BA review. "
                 "Prefer specific, trackable wording, split independent requirements into separate rows, "
-                "and keep all criteria, rules, and dependencies within the scope implied by the BRD."
+                "and keep all criteria, rules, and dependencies within the scope implied by the BRD. "
+                "If revision instructions are present, address them explicitly in the regenerated package."
             )
         )
 

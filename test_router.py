@@ -80,6 +80,17 @@ def test_pipeline():
             print("Business Rules:", story.business_rules)
             print("Dependencies:", story.dependencies)
         print("-" * 40)
+        print("\n=== Step 5: Testing Critic Loop ===")
+        review_state = run_graph_for_text(parsed_text, target_stage="review")
+        print("Review Status:", review_state.get("review_status"))
+        print("Refine Attempts:", review_state.get("refine_attempts"))
+        latest_critic = review_state.get("critic_output")
+        if latest_critic is not None:
+            print("Critic Verdict:", latest_critic.verdict)
+            print("Critic Summary:", latest_critic.summary)
+            print("Critic Issues:", latest_critic.issues[:3])
+        print("Recommended Next Steps:", review_state.get("recommended_next_steps", []))
+        print("-" * 40)
         print("Full structured pipeline verification: PASSED")
     except Exception as e:
         print(f"Router Agent test FAILED: {e}")

@@ -7,9 +7,11 @@ from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 
 from app.schemas.generator_schema import GeneratorOutput
+from app.schemas.review_schema import WorkflowReviewOutput
 from app.schemas.router_schema import RouterOutput
 from app.schemas.specialist_schema import SpecialistOutput
 from app.services.export_service import build_export_bytes, export_media_type
+from app.workflows.brd_graph import build_review_output
 from app.workflows.brd_graph import run_graph_for_file, run_graph_for_text
 
 router = APIRouter(prefix="/api/v1/analyze", tags=["analysis"])
@@ -196,4 +198,45 @@ async def export_user_story_file(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred while exporting the generated user stories: {str(e)}"
+        )
+
+
+@router.post("/review/text", response_model=WorkflowReviewOutput)
+async def review_user_story_text(request: TextAnalysisRequest):
+    """
+    Run the full pipeline through critic review with capped refinements.
+    """
+    try:
+        result = run_graph_for_text(request.raw_text, target_stage="review")
+        return build_review_output(result)
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred during critic review: {str(e)}"
+        )
+
+
+@router.post("/review/file", response_model=WorkflowReviewOutput)
+async def review_user_story_file(file: UploadFile = File(...)):
+    """
+    Upload a BRD file and run the full pipeline through critic review with capped refinements.
+    """
+    try:
+        content = await file.read()
+        result = run_graph_for_file(file.filename, content, target_stage="review")
+        return build_review_output(result)
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred during file-based critic review: {str(e)}"
         )
