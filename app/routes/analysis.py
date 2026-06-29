@@ -40,6 +40,31 @@ class TextAnalysisRequest(BaseModel):
     raw_text: str = Field(..., description="The raw BRD text content to analyze")
 
 
+def _raise_analysis_error(exc: Exception, default_message: str) -> None:
+    if isinstance(exc, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+    error_text = str(exc)
+    lowered = error_text.lower()
+
+    if "permission_denied" in lowered or "403" in lowered:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "Parsing succeeded, but the configured Gemini project or API key was denied access "
+                f"by the upstream model provider. Original error: {error_text}"
+            ),
+        )
+
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"{default_message}: {error_text}",
+    )
+
+
 def _safe_export_basename(name: str) -> str:
     normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
     return normalized or "user_stories"
@@ -67,16 +92,8 @@ async def analyze_text(request: TextAnalysisRequest):
     try:
         result = run_graph_for_text(request.raw_text, target_stage="route")
         return result["router_output"]
-    except ValueError as ve:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(ve)
-        )
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred during routing analysis: {str(e)}"
-        )
+        _raise_analysis_error(e, "An error occurred during routing analysis")
 
 @router.post("/route/file", response_model=RouterOutput)
 async def analyze_file(file: UploadFile = File(...)):
@@ -87,16 +104,8 @@ async def analyze_file(file: UploadFile = File(...)):
         content = await file.read()
         result = run_graph_for_file(file.filename, content, target_stage="route")
         return result["router_output"]
-    except ValueError as ve:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(ve)
-        )
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred while parsing or analyzing the file: {str(e)}"
-        )
+        _raise_analysis_error(e, "An error occurred while parsing or analyzing the file")
 
 
 @router.post("/specialist/text", response_model=SpecialistOutput)
@@ -107,16 +116,8 @@ async def analyze_specialist_text(request: TextAnalysisRequest):
     try:
         result = run_graph_for_text(request.raw_text, target_stage="specialist")
         return result["specialist_output"]
-    except ValueError as ve:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(ve)
-        )
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred during specialist analysis: {str(e)}"
-        )
+        _raise_analysis_error(e, "An error occurred during specialist analysis")
 
 
 @router.post("/specialist/file", response_model=SpecialistOutput)
@@ -128,16 +129,8 @@ async def analyze_specialist_file(file: UploadFile = File(...)):
         content = await file.read()
         result = run_graph_for_file(file.filename, content, target_stage="specialist")
         return result["specialist_output"]
-    except ValueError as ve:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(ve)
-        )
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred while parsing or running specialist analysis: {str(e)}"
-        )
+        _raise_analysis_error(e, "An error occurred while parsing or running specialist analysis")
 
 
 @router.post("/generate/text", response_model=GeneratorOutput)
@@ -155,16 +148,8 @@ async def generate_user_story_text(request: TextAnalysisRequest, response: Respo
         )
         response.headers["X-Workflow-Id"] = workflow.id
         return result["generator_output"]
-    except ValueError as ve:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(ve)
-        )
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred during user story generation: {str(e)}"
-        )
+        _raise_analysis_error(e, "An error occurred during user story generation")
 
 
 @router.post("/generate/file", response_model=GeneratorOutput)
@@ -191,16 +176,8 @@ async def generate_user_story_file(
         if response is not None:
             response.headers["X-Workflow-Id"] = workflow.id
         return result["generator_output"]
-    except ValueError as ve:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(ve)
-        )
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred while generating the user story: {str(e)}"
-        )
+        _raise_analysis_error(e, "An error occurred while generating the user story")
 
 
 @router.post("/generate/text/export")
@@ -236,16 +213,8 @@ async def export_user_story_text(
             payload=payload,
             workflow_id=workflow.id,
         )
-    except ValueError as ve:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(ve)
-        )
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred while exporting the generated user stories: {str(e)}"
-        )
+        _raise_analysis_error(e, "An error occurred while exporting the generated user stories")
 
 
 @router.post("/generate/file/export")

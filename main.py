@@ -2,7 +2,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import analysis
-from app.config import settings
+from app.config import configure_langsmith, settings
 from app.db.session import init_db
 from app.services.storage_service import ensure_storage_dirs
 
@@ -27,6 +27,7 @@ app.include_router(analysis.router)
 
 @app.on_event("startup")
 def startup_event():
+    configure_langsmith()
     init_db()
     ensure_storage_dirs()
 

@@ -2,6 +2,7 @@ from functools import lru_cache
 from typing import Literal, NotRequired, TypedDict
 
 from langgraph.graph import END, START, StateGraph
+from langsmith import traceable
 
 from app.agents.critic import CriticAgent
 from app.agents.generator import GeneratorAgent
@@ -31,6 +32,7 @@ class WorkflowState(TypedDict):
     errors: NotRequired[list[str]]
 
 
+@traceable(name="ingest_input_node")
 def ingest_input_node(state: WorkflowState) -> dict:
     raw_text = state.get("raw_text")
     if raw_text:
@@ -39,6 +41,7 @@ def ingest_input_node(state: WorkflowState) -> dict:
     return parse_document_node(state)
 
 
+@traceable(name="parse_document_node")
 def parse_document_node(state: WorkflowState) -> dict:
     filename = state.get("filename")
     file_bytes = state.get("file_bytes")
@@ -52,6 +55,7 @@ def parse_document_node(state: WorkflowState) -> dict:
     return {"raw_text": raw_text}
 
 
+@traceable(name="route_brd_node")
 def route_brd_node(state: WorkflowState) -> dict:
     raw_text = state.get("raw_text")
     if not raw_text:
@@ -62,6 +66,7 @@ def route_brd_node(state: WorkflowState) -> dict:
     return {"router_output": router_output}
 
 
+@traceable(name="specialize_brd_node")
 def specialize_brd_node(state: WorkflowState) -> dict:
     raw_text = state.get("raw_text")
     router_output = state.get("router_output")
@@ -76,6 +81,7 @@ def specialize_brd_node(state: WorkflowState) -> dict:
     return {"specialist_output": specialist_output}
 
 
+@traceable(name="generate_user_story_node")
 def generate_user_story_node(state: WorkflowState) -> dict:
     raw_text = state.get("raw_text")
     router_output = state.get("router_output")
@@ -103,6 +109,7 @@ def generate_user_story_node(state: WorkflowState) -> dict:
     return {"generator_output": generator_output}
 
 
+@traceable(name="critic_review_node")
 def critic_review_node(state: WorkflowState) -> dict:
     raw_text = state.get("raw_text")
     router_output = state.get("router_output")
@@ -264,6 +271,7 @@ def get_brd_graph():
     return workflow.compile()
 
 
+@traceable(name="run_graph_for_file")
 def run_graph_for_file(
     filename: str,
     file_bytes: bytes,
@@ -284,6 +292,7 @@ def run_graph_for_file(
     )
 
 
+@traceable(name="run_graph_for_text")
 def run_graph_for_text(
     raw_text: str,
     target_stage: Literal["parse", "route", "specialist", "generate", "review"],
