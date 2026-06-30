@@ -6,6 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     gemini_api_key: Optional[str] = None
+    gemini_api_keys: Optional[str] = None
+    gemini_fallback_api_keys: Optional[str] = None
     database_url: str = "sqlite:///./ba_accelerator.db"
     storage_root: str = "storage"
     port: int = 8000

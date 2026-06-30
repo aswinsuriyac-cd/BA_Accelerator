@@ -1,6 +1,3 @@
-import os
-
-from google import genai
 from google.genai import types
 
 from app.config import settings
@@ -8,24 +5,10 @@ from app.schemas.generator_schema import GeneratorOutput
 from app.schemas.review_schema import CriticOutput
 from app.schemas.router_schema import RouterOutput
 from app.schemas.specialist_schema import SpecialistOutput
+from app.services.gemini_service import generate_content_with_fallback
 
 
 class CriticAgent:
-    def __init__(self):
-        self.api_key = settings.gemini_api_key or os.environ.get("GEMINI_API_KEY")
-        self._client = None
-
-    @property
-    def client(self) -> genai.Client:
-        if self._client is None:
-            if not self.api_key:
-                raise ValueError(
-                    "GEMINI_API_KEY is not set. Please create a `.env` file with your "
-                    "GEMINI_API_KEY or export the GEMINI_API_KEY environment variable."
-                )
-            self._client = genai.Client(api_key=self.api_key)
-        return self._client
-
     def review(
         self,
         raw_brd_text: str,
@@ -72,7 +55,7 @@ class CriticAgent:
             )
         )
 
-        response = self.client.models.generate_content(
+        response = generate_content_with_fallback(
             model=settings.model_name,
             contents=prompt,
             config=config
