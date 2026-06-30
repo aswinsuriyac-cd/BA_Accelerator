@@ -25,7 +25,9 @@ import type {
 type Mode = 'text' | 'file'
 type Stage = 'route' | 'specialist' | 'generate' | 'review'
 
-const stageMeta: Record<Stage, { title: string; description: string }> = {
+const stageOrder: Stage[] = ['route', 'specialist', 'generate', 'review']
+
+const stageMeta: Record<Stage, { title: string; description: string; requiredOutput?: string }> = {
   route: {
     title: 'Router',
     description: 'Classify the BRD and choose the downstream specialist.',
@@ -33,14 +35,17 @@ const stageMeta: Record<Stage, { title: string; description: string }> = {
   specialist: {
     title: 'Specialist',
     description: 'Extract actors, goals, constraints, criteria, and edge cases.',
+    requiredOutput: 'Needs Router output first.',
   },
   generate: {
     title: 'Generator',
     description: 'Produce the workbook-style story package and assign IDs.',
+    requiredOutput: 'Needs Specialist output first.',
   },
   review: {
     title: 'Critic + BA Gate',
     description: 'Run critic review and send successful outputs into BA review.',
+    requiredOutput: 'Needs Generator output first.',
   },
 }
 
@@ -144,7 +149,7 @@ function App() {
   const [mode, setMode] = useState<Mode>('text')
   const [rawText, setRawText] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [activeStage, setActiveStage] = useState<Stage>('review')
+  const [activeStage, setActiveStage] = useState<Stage>('route')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [health, setHealth] = useState<'checking' | 'healthy' | 'offline'>('checking')
@@ -157,6 +162,39 @@ function App() {
   const [specialistOutput, setSpecialistOutput] = useState<SpecialistOutput | null>(null)
   const [generatorOutput, setGeneratorOutput] = useState<GeneratorOutput | null>(null)
   const [reviewOutput, setReviewOutput] = useState<WorkflowReviewOutput | null>(null)
+
+  const resetCurrentOutputs = () => {
+    setRouteOutput(null)
+    setSpecialistOutput(null)
+    setGeneratorOutput(null)
+    setReviewOutput(null)
+    setCurrentWorkflowId(null)
+    setActiveStage('route')
+  }
+
+  const getMissingPrerequisite = (stage: Stage) => {
+    if (stage === 'specialist' && !routeOutput) {
+      return 'Run Router first. Specialist needs Router output before it can analyze the BRD.'
+    }
+    if (stage === 'generate' && !specialistOutput) {
+      return 'Run Specialist first. Generator needs Specialist output before it can create stories.'
+    }
+    if (stage === 'review' && !generatorOutput) {
+      return 'Run Generator first. Critic review needs generated stories before it can review them.'
+    }
+    return null
+  }
+
+  const selectStage = (stage: Stage) => {
+    const missingPrerequisite = getMissingPrerequisite(stage)
+    if (missingPrerequisite) {
+      setError(missingPrerequisite)
+      return
+    }
+
+    setError(null)
+    setActiveStage(stage)
+  }
 
   useEffect(() => {
     fetchHealth()
@@ -212,6 +250,12 @@ function App() {
   }, [selectedWorkflow])
 
   const runStage = async () => {
+    const missingPrerequisite = getMissingPrerequisite(activeStage)
+    if (missingPrerequisite) {
+      setError(missingPrerequisite)
+      return
+    }
+
     setLoading(true)
     setError(null)
 
@@ -227,12 +271,14 @@ function App() {
       if (activeStage === 'route') {
         const result = await routeAnalysis(payload)
         setRouteOutput(result.data)
+        setActiveStage('specialist')
         return
       }
 
       if (activeStage === 'specialist') {
         const result = await specialistAnalysis(payload)
         setSpecialistOutput(result.data)
+        setActiveStage('generate')
         return
       }
 
@@ -241,6 +287,7 @@ function App() {
         setGeneratorOutput(result.data)
         setCurrentWorkflowId(result.workflowId ?? null)
         await loadWorkflows(result.workflowId ?? null)
+        setActiveStage('review')
         return
       }
 
@@ -367,7 +414,10 @@ function App() {
                   <span className="mb-2 block text-sm font-medium text-stone-700">Raw BRD Text</span>
                   <textarea
                     value={rawText}
-                    onChange={(event) => setRawText(event.target.value)}
+                    onChange={(event) => {
+                      setRawText(event.target.value)
+                      resetCurrentOutputs()
+                    }}
                     rows={15}
                     placeholder="Paste the BRD content here..."
                     className="w-full rounded-3xl border border-stone-200 bg-stone-50 px-4 py-4 text-sm text-stone-900 outline-none ring-0 transition placeholder:text-stone-400 focus:border-amber-500"
@@ -384,7 +434,10 @@ function App() {
                     type="file"
                     accept=".txt,.md,.pdf,.docx"
                     className="hidden"
-                    onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+                    onChange={(event) => {
+                      setSelectedFile(event.target.files?.[0] ?? null)
+                      resetCurrentOutputs()
+                    }}
                   />
                   {selectedFile ? (
                     <span className="mt-4 text-sm text-stone-700">{selectedFile.name}</span>
@@ -395,30 +448,40 @@ function App() {
               <div>
                 <p className="text-sm font-medium text-stone-700">Stage</p>
                 <div className="mt-3 grid gap-3">
-                  {(Object.keys(stageMeta) as Stage[]).map((stage) => (
-                    <button
-                      key={stage}
-                      type="button"
-                      onClick={() => setActiveStage(stage)}
-                      className={`rounded-2xl border px-4 py-4 text-left transition ${
-                        activeStage === stage
-                          ? 'border-amber-500 bg-amber-50 shadow-sm'
-                          : 'border-stone-200 bg-white hover:border-stone-300'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-semibold text-stone-950">
-                          {stageMeta[stage].title}
-                        </span>
-                        <span className="text-xs uppercase tracking-[0.24em] text-stone-500">
-                          {stage}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-sm leading-6 text-stone-600">
-                        {stageMeta[stage].description}
-                      </p>
-                    </button>
-                  ))}
+                  {stageOrder.map((stage) => {
+                    const missingPrerequisite = getMissingPrerequisite(stage)
+                    return (
+                      <button
+                        key={stage}
+                        type="button"
+                        onClick={() => selectStage(stage)}
+                        className={`rounded-2xl border px-4 py-4 text-left transition ${
+                          activeStage === stage
+                            ? 'border-amber-500 bg-amber-50 shadow-sm'
+                            : missingPrerequisite
+                              ? 'border-stone-200 bg-stone-50 opacity-75'
+                              : 'border-stone-200 bg-white hover:border-stone-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-semibold text-stone-950">
+                            {stageMeta[stage].title}
+                          </span>
+                          <span className="text-xs uppercase tracking-[0.24em] text-stone-500">
+                            {missingPrerequisite ? 'waiting' : stage}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-sm leading-6 text-stone-600">
+                          {stageMeta[stage].description}
+                        </p>
+                        {stageMeta[stage].requiredOutput ? (
+                          <p className={`mt-2 text-xs font-medium ${missingPrerequisite ? 'text-rose-600' : 'text-emerald-700'}`}>
+                            {missingPrerequisite ? stageMeta[stage].requiredOutput : 'Previous output is ready.'}
+                          </p>
+                        ) : null}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
 
