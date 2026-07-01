@@ -309,3 +309,76 @@ def run_graph_for_text(
             "errors": [],
         }
     )
+
+
+@traceable(name="run_rework_for_workflow")
+def run_rework_for_workflow(
+    raw_text: str,
+    router_output: RouterOutput,
+    specialist_output: SpecialistOutput,
+    existing_generator_output: GeneratorOutput,
+    ba_comments: str,
+    max_refine_attempts: int = 3,
+) -> WorkflowState:
+    """
+    Rework a persisted workflow from BA comments without rerunning parse, route, or specialist nodes.
+    """
+    if not raw_text.strip():
+        raise ValueError("Raw BRD text is required before rework.")
+    if not ba_comments.strip():
+        raise ValueError("BA comments are required to rework the workflow.")
+
+    generator_agent = GeneratorAgent()
+    critic_agent = CriticAgent()
+    critic_history: list[CriticOutput] = []
+    refine_attempts = 0
+    revision_instructions = [f"Address BA review comments: {ba_comments.strip()}"]
+    current_generator_output = existing_generator_output
+
+    while True:
+        current_generator_output = generator_agent.generate(
+            raw_text,
+            router_output,
+            specialist_output,
+            revision_instructions=revision_instructions,
+            refine_attempts=refine_attempts,
+            existing_generator_output=current_generator_output,
+            ba_comments=ba_comments,
+        )
+        critic_output = critic_agent.review(raw_text, router_output, specialist_output, current_generator_output)
+        critic_history.append(critic_output)
+
+        if critic_output.verdict == "pass":
+            return {
+                "raw_text": raw_text,
+                "target_stage": "review",
+                "router_output": router_output,
+                "specialist_output": specialist_output,
+                "generator_output": current_generator_output,
+                "critic_output": critic_output,
+                "critic_history": critic_history,
+                "refine_attempts": refine_attempts,
+                "max_refine_attempts": max_refine_attempts,
+                "review_status": "pending_ba_review",
+                "recommended_next_steps": ["Submit the reworked story package to the BA for final approval."],
+                "errors": [],
+            }
+
+        refine_attempts += 1
+        if refine_attempts >= max_refine_attempts:
+            return {
+                "raw_text": raw_text,
+                "target_stage": "review",
+                "router_output": router_output,
+                "specialist_output": specialist_output,
+                "generator_output": current_generator_output,
+                "critic_output": critic_output,
+                "critic_history": critic_history,
+                "refine_attempts": refine_attempts,
+                "max_refine_attempts": max_refine_attempts,
+                "review_status": "needs_manual_review",
+                "recommended_next_steps": build_manual_review_steps(critic_output),
+                "errors": [],
+            }
+
+        revision_instructions = critic_output.revision_instructions

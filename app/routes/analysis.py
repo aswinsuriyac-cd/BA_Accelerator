@@ -23,16 +23,19 @@ from app.services.persistence_service import (
     build_persisted_review,
     get_export_or_404,
     get_latest_generator_output,
+    get_latest_router_output,
+    get_latest_specialist_output,
     get_workflow_or_404,
     list_workflows,
     persist_export_record,
+    persist_reworked_review,
     update_workflow_status,
     workflow_to_detail,
     workflow_to_summary,
 )
 from app.services.export_service import build_export_bytes, export_media_type
 from app.workflows.brd_graph import build_review_output
-from app.workflows.brd_graph import run_graph_for_file, run_graph_for_text
+from app.workflows.brd_graph import run_graph_for_file, run_graph_for_text, run_rework_for_workflow
 
 router = APIRouter(prefix="/api/v1/analyze", tags=["analysis"])
 
@@ -384,6 +387,54 @@ async def mark_manual_review(
 
     updated = update_workflow_status(db, workflow, "needs_manual_review", request.comments)
     return WorkflowDecisionResponse(workflow_id=updated.id, status=updated.status, comments=request.comments)
+
+
+@router.post("/workflows/{workflow_id}/rework", response_model=WorkflowReviewOutput)
+async def rework_workflow_from_ba_comments(
+    workflow_id: str,
+    request: WorkflowDecisionRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    """
+    Rework a persisted workflow from BA comments without rerunning parse, route, or specialist analysis.
+    """
+    workflow = get_workflow_or_404(db, workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found.")
+    if workflow.document is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow has no source document to rework.")
+    if not request.comments or not request.comments.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="BA comments are required to rework a workflow.")
+
+    router_output = get_latest_router_output(workflow)
+    specialist_output = get_latest_specialist_output(workflow)
+    generator_output = get_latest_generator_output(workflow)
+    if router_output is None or specialist_output is None or generator_output is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Workflow must have persisted router, specialist, and generator outputs before rework.",
+        )
+
+    try:
+        state = run_rework_for_workflow(
+            workflow.document.parsed_text,
+            router_output,
+            specialist_output,
+            generator_output,
+            request.comments,
+            max_refine_attempts=workflow.max_refine_attempts,
+        )
+        review_output = persist_reworked_review(db, workflow, state, request.comments)
+        response.headers["X-Workflow-Id"] = workflow.id
+        return review_output
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while reworking the workflow: {str(e)}",
+        )
 
 
 @router.get("/workflows/{workflow_id}/exports/{export_id}")

@@ -15,12 +15,25 @@ class GeneratorAgent:
         specialist_output: SpecialistOutput,
         revision_instructions: list[str] | None = None,
         refine_attempts: int = 0,
+        existing_generator_output: GeneratorOutput | None = None,
+        ba_comments: str | None = None,
     ) -> GeneratorOutput:
         """
         Transform structured requirements into a user story package ready for review.
         """
         if not raw_brd_text.strip():
             raise ValueError("The provided BRD text is empty.")
+
+        rework_context = ""
+        if existing_generator_output is not None or ba_comments:
+            rework_context = (
+                "Rework context:\n"
+                "- Treat this as a revision of the existing story package, not a fresh unrelated draft.\n"
+                "- Preserve existing story IDs and useful accepted content unless a BA comment or critic instruction requires a change.\n"
+                "- Add, remove, or split stories only when the BRD, BA comments, or critic feedback clearly requires it.\n"
+                f"BA comments: {ba_comments or 'None'}\n"
+                f"Existing story package:\n{existing_generator_output.model_dump_json(indent=2) if existing_generator_output else 'None'}\n\n"
+            )
 
         prompt = (
             "You are given a raw BRD, the router classification, and structured specialist output.\n\n"
@@ -52,6 +65,7 @@ class GeneratorAgent:
             "- Do not invent links or IDs beyond the requested story IDs\n\n"
             f"Current refinement attempt: {refine_attempts}\n"
             f"Revision instructions from critic: {revision_instructions or []}\n\n"
+            f"{rework_context}"
             f"Router classification:\n{router_output.model_dump_json(indent=2)}\n\n"
             f"Specialist output:\n{specialist_output.model_dump_json(indent=2)}\n\n"
             f"--- RAW BRD START ---\n{raw_brd_text}\n--- RAW BRD END ---"

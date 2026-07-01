@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session, joinedload
 from app.models.workflow import Artifact, Document, ExportedFile, ReviewAttempt, Workflow
 from app.schemas.generator_schema import GeneratorOutput
 from app.schemas.review_schema import WorkflowReviewOutput
+from app.schemas.router_schema import RouterOutput
+from app.schemas.specialist_schema import SpecialistOutput
 from app.schemas.workflow_schema import (
     ArtifactRecord,
     DocumentRecord,
@@ -94,6 +96,67 @@ def persist_workflow_state(db: Session, workflow: Workflow, state: WorkflowState
     db.commit()
     db.refresh(workflow)
     return workflow
+
+
+def _latest_artifact(workflow: Workflow, artifact_type: str) -> Artifact | None:
+    artifacts = [artifact for artifact in workflow.artifacts if artifact.artifact_type == artifact_type]
+    if not artifacts:
+        return None
+    return max(artifacts, key=lambda item: item.created_at)
+
+
+def get_latest_router_output(workflow: Workflow) -> RouterOutput | None:
+    latest = _latest_artifact(workflow, "router_output")
+    if latest is None:
+        return None
+    return RouterOutput.model_validate_json(latest.content_json)
+
+
+def get_latest_specialist_output(workflow: Workflow) -> SpecialistOutput | None:
+    latest = _latest_artifact(workflow, "specialist_output")
+    if latest is None:
+        return None
+    return SpecialistOutput.model_validate_json(latest.content_json)
+
+
+def persist_reworked_review(db: Session, workflow: Workflow, state: WorkflowState, ba_comments: str) -> WorkflowReviewOutput:
+    generator_output = state.get("generator_output")
+    critic_output = state.get("critic_output")
+    if generator_output is None:
+        raise ValueError("Generator output is missing from the rework state.")
+    if critic_output is None:
+        raise ValueError("Critic output is missing from the rework state.")
+
+    db.add(
+        Artifact(
+            workflow=workflow,
+            artifact_type="ba_rework_request",
+            content_json=json.dumps({"comments": ba_comments}),
+        )
+    )
+    db.add(Artifact(workflow=workflow, artifact_type="generator_output", content_json=generator_output.model_dump_json(indent=2)))
+    db.add(Artifact(workflow=workflow, artifact_type="critic_output", content_json=critic_output.model_dump_json(indent=2)))
+
+    next_attempt_number = max((review.attempt_number for review in workflow.reviews), default=0) + 1
+    for offset, review in enumerate(state.get("critic_history", [])):
+        db.add(
+            ReviewAttempt(
+                workflow=workflow,
+                attempt_number=next_attempt_number + offset,
+                verdict=review.verdict,
+                summary=review.summary,
+                issues_json=json.dumps(review.issues),
+                revision_instructions_json=json.dumps(review.revision_instructions),
+            )
+        )
+
+    workflow.target_stage = "review"
+    workflow.refine_attempts = state.get("refine_attempts", 0)
+    workflow.max_refine_attempts = state.get("max_refine_attempts", workflow.max_refine_attempts)
+    workflow.status = state.get("review_status") or workflow.status
+    db.commit()
+    db.refresh(workflow)
+    return build_review_output(state)
 
 
 def persist_export_record(
@@ -283,9 +346,7 @@ def get_export_or_404(db: Session, workflow_id: str, export_id: str) -> Exported
 
 
 def get_latest_generator_output(workflow: Workflow) -> GeneratorOutput | None:
-    generator_artifacts = [artifact for artifact in workflow.artifacts if artifact.artifact_type == "generator_output"]
-    if not generator_artifacts:
+    latest = _latest_artifact(workflow, "generator_output")
+    if latest is None:
         return None
-
-    latest = max(generator_artifacts, key=lambda item: item.created_at)
     return GeneratorOutput.model_validate_json(latest.content_json)

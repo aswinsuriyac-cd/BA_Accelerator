@@ -7,6 +7,7 @@ import {
   fetchWorkflowDetail,
   fetchWorkflows,
   generateStories,
+  reworkWorkflow,
   reviewStories,
   routeAnalysis,
   specialistAnalysis,
@@ -318,6 +319,34 @@ function App() {
       setSelectedWorkflow(updated)
     } catch (decisionError) {
       setError(decisionError instanceof Error ? decisionError.message : 'Unable to update workflow')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const reworkSelectedWorkflow = async () => {
+    if (!selectedWorkflowId) {
+      return
+    }
+    if (!decisionComment.trim()) {
+      setError('Add BA comments before reworking the workflow.')
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await reworkWorkflow(selectedWorkflowId, decisionComment)
+      setDecisionComment('')
+      setReviewOutput(result.data)
+      setGeneratorOutput(result.data.generator_output)
+      setCurrentWorkflowId(result.workflowId ?? selectedWorkflowId)
+      setActiveStage('review')
+      await loadWorkflows(selectedWorkflowId)
+      const updated = await fetchWorkflowDetail(selectedWorkflowId)
+      setSelectedWorkflow(updated)
+    } catch (reworkError) {
+      setError(reworkError instanceof Error ? reworkError.message : 'Unable to rework workflow')
     } finally {
       setLoading(false)
     }
@@ -685,7 +714,7 @@ function App() {
                     />
                   </label>
 
-                  <div className="grid gap-2 sm:grid-cols-3">
+                  <div className="grid gap-2 sm:grid-cols-4">
                     <button
                       type="button"
                       onClick={() => actOnWorkflow('approve')}
@@ -706,6 +735,13 @@ function App() {
                       className="rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-rose-500"
                     >
                       Manual Review
+                    </button>
+                    <button
+                      type="button"
+                      onClick={reworkSelectedWorkflow}
+                      className="rounded-2xl bg-stone-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-stone-800"
+                    >
+                      Rework
                     </button>
                   </div>
 

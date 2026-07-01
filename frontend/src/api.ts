@@ -113,6 +113,16 @@ export async function updateWorkflowDecision(
   return response.json() as Promise<{ workflow_id: string; status: string; comments?: string | null }>
 }
 
+export async function reworkWorkflow(workflowId: string, comments: string): Promise<ApiResult<WorkflowReviewOutput>> {
+  const response = await fetch(endpoint(`/api/v1/analyze/workflows/${workflowId}/rework`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ comments }),
+  })
+
+  return parseJsonResponse<WorkflowReviewOutput>(response)
+}
+
 async function downloadBlob(response: Response) {
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Export failed' }))
