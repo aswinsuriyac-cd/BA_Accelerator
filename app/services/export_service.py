@@ -1,4 +1,6 @@
 from io import BytesIO
+from html import escape
+from math import ceil
 from typing import Literal
 
 from docx import Document
@@ -6,9 +8,10 @@ from docx.enum.section import WD_ORIENT
 from docx.shared import Inches
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
+from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.schemas.generator_schema import GeneratorOutput, UserStoryRow
@@ -33,6 +36,10 @@ EXCEL_HEADERS = [
 
 def _block(items: list[str]) -> str:
     return "\n\n".join(item.strip() for item in items if item and item.strip())
+
+
+def _html_block(value: str | int) -> str:
+    return escape(str(value)).replace("\n", "<br/>")
 
 
 def _story_row_values(story: UserStoryRow) -> list[str | int]:
@@ -85,6 +92,16 @@ def build_excel_export(output: GeneratorOutput) -> bytes:
     for row in sheet.iter_rows(min_row=2):
         for cell in row:
             cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+    for row in sheet.iter_rows(min_row=2):
+        estimated_lines = 1
+        for cell in row:
+            value = "" if cell.value is None else str(cell.value)
+            column_width = sheet.column_dimensions[get_column_letter(cell.column)].width or 12
+            explicit_lines = value.count("\n") + 1
+            wrapped_lines = ceil(len(value) / max(int(column_width * 1.2), 1))
+            estimated_lines = max(estimated_lines, explicit_lines, wrapped_lines)
+        sheet.row_dimensions[row[0].row].height = min(max(estimated_lines * 15, 30), 180)
 
     buffer = BytesIO()
     workbook.save(buffer)
@@ -145,6 +162,24 @@ def build_docx_export(output: GeneratorOutput) -> bytes:
 def build_pdf_export(output: GeneratorOutput) -> bytes:
     buffer = BytesIO()
     styles = getSampleStyleSheet()
+    title_style = styles["Title"]
+    normal_style = styles["Normal"]
+    header_style = ParagraphStyle(
+        "ExportTableHeader",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=7.5,
+        leading=9,
+        wordWrap="CJK",
+    )
+    cell_style = ParagraphStyle(
+        "ExportTableCell",
+        parent=styles["Normal"],
+        fontSize=7.5,
+        leading=9,
+        wordWrap="CJK",
+        splitLongWords=True,
+    )
     document = SimpleDocTemplate(
         buffer,
         pagesize=landscape(A4),
@@ -154,40 +189,42 @@ def build_pdf_export(output: GeneratorOutput) -> bytes:
         bottomMargin=24,
     )
 
-    story_table_rows = [["US ID", "Summary", "Epic / Feature", "Story", "Acceptance Criteria"]]
+    story_table_rows = [
+        [Paragraph(_html_block(header), header_style) for header in ["US ID", "Summary", "Epic / Feature", "Story", "Acceptance Criteria"]]
+    ]
     for story in output.stories:
         story_table_rows.append(
             [
-                story.us_id,
-                story.us_summary,
-                f"{story.epic}\n{story.feature}",
-                story.user_story_description,
-                _block(story.acceptance_criteria),
+                Paragraph(_html_block(story.us_id), cell_style),
+                Paragraph(_html_block(story.us_summary), cell_style),
+                Paragraph(_html_block(f"{story.epic}\n{story.feature}"), cell_style),
+                Paragraph(_html_block(story.user_story_description), cell_style),
+                Paragraph(_html_block(_block(story.acceptance_criteria)), cell_style),
             ]
         )
 
     elements = [
-        Paragraph(output.document_title, styles["Title"]),
+        Paragraph(_html_block(output.document_title), title_style),
         Spacer(1, 8),
-        Paragraph(f"Story ID Prefix: {output.story_id_prefix}", styles["Normal"]),
+        Paragraph(_html_block(f"Story ID Prefix: {output.story_id_prefix}"), normal_style),
         Spacer(1, 12),
         Table(
             story_table_rows,
             colWidths=[60, 120, 120, 240, 220],
             repeatRows=1,
+            splitByRow=True,
             style=TableStyle(
                 [
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9E2F3")),
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 8),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
                     ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
                     ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F7F9FC")]),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                    ("TOPPADDING", (0, 0), (-1, -1), 6),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
                 ]
             ),
         ),
