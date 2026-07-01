@@ -1,5 +1,8 @@
 import io
 import mimetypes
+from csv import reader
+from email import policy
+from email.parser import BytesParser
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 from docx import Document
@@ -7,10 +10,10 @@ from docx.opc.exceptions import PackageNotFoundError
 from zipfile import BadZipFile
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
-from google import genai
 from google.genai import types
 
-_client = genai.Client()
+from app.config import settings
+from app.services.gemini_service import generate_content_with_fallback
 
 _IMAGE_MIME_TYPES = {
     "png": "image/png",
@@ -36,6 +39,33 @@ def parse_txt(file_bytes: bytes) -> str:
         return file_bytes.decode("utf-8")
     except UnicodeDecodeError:
         return file_bytes.decode("latin-1")
+
+
+def parse_csv(file_bytes: bytes) -> str:
+    """Parse CSV file content into pipe-delimited rows."""
+    text = parse_txt(file_bytes)
+    rows = []
+    for row in reader(io.StringIO(text)):
+        row_text = " | ".join(cell.strip() for cell in row if cell and cell.strip())
+        if row_text:
+            rows.append(row_text)
+    return "\n".join(rows)
+
+
+def parse_email(file_bytes: bytes) -> str:
+    """Parse EML email content into readable text."""
+    message = BytesParser(policy=policy.default).parsebytes(file_bytes)
+    parts = [
+        f"Subject: {message.get('subject', '')}",
+        f"From: {message.get('from', '')}",
+        f"To: {message.get('to', '')}",
+    ]
+
+    body = message.get_body(preferencelist=("plain", "html"))
+    if body is not None:
+        parts.append(body.get_content())
+
+    return "\n".join(part for part in parts if part and part.strip())
 
 
 def parse_pdf(file_bytes: bytes) -> str:
@@ -137,12 +167,13 @@ def parse_image(file_bytes: bytes, filename: str | None = None) -> str:
             raise ValueError("Could not determine image format.")
 
     try:
-        response = _client.models.generate_content(
-            model="gemini-2.5-flash",
+        response = generate_content_with_fallback(
+            model=settings.model_name,
             contents=[
                 types.Part.from_bytes(data=file_bytes, mime_type=mime_type),
                 _OCR_PROMPT,
             ],
+            config=types.GenerateContentConfig(),
         )
     except Exception as e:
         raise RuntimeError(f"Image text extraction failed: {e}")
@@ -156,8 +187,12 @@ def parse_document(filename: str, content: bytes) -> str:
         raise ValueError(f"Filename '{filename}' has no extension.")
 
     ext = filename.lower().rsplit(".", 1)[-1]
-    if ext in ("txt", "md"):
+    if ext in ("txt", "md", "markdown"):
         return parse_txt(content)
+    elif ext == "csv":
+        return parse_csv(content)
+    elif ext == "eml":
+        return parse_email(content)
     elif ext == "pdf":
         return parse_pdf(content)
     elif ext == "docx":
@@ -169,6 +204,6 @@ def parse_document(filename: str, content: bytes) -> str:
     else:
         raise ValueError(
             f"Unsupported file format: .{ext}. Supported formats are: "
-            f".txt, .md, .pdf, .docx, .xlsx, .xlsm, "
+            f".txt, .md, .markdown, .csv, .eml, .pdf, .docx, .xlsx, .xlsm, "
             f"{', '.join('.' + e for e in _IMAGE_MIME_TYPES)}"
         )

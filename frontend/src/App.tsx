@@ -455,13 +455,13 @@ function App() {
               ) : (
                 <label className="flex cursor-pointer flex-col items-center justify-center rounded-[1.75rem] border border-dashed border-stone-300 bg-stone-50 px-6 py-10 text-center transition hover:border-amber-500 hover:bg-amber-50">
                   <span className="text-sm font-semibold text-stone-900">Upload BRD file</span>
-                  <span className="mt-2 text-sm text-stone-500">Supports txt, md, pdf, docx</span>
+                  <span className="mt-2 text-sm text-stone-500">Supports txt, md, markdown, csv, eml, pdf, docx, xlsx, xlsm, and images</span>
                   <span className="mt-5 rounded-full bg-stone-950 px-4 py-2 text-sm font-medium text-white">
                     Choose file
                   </span>
                   <input
                     type="file"
-                    accept=".txt,.md,.pdf,.docx"
+                    accept=".txt,.md,.markdown,.csv,.eml,.pdf,.docx,.xlsx,.xlsm,.png,.jpg,.jpeg,.gif,.bmp,.tiff,.webp"
                     className="hidden"
                     onChange={(event) => {
                       setSelectedFile(event.target.files?.[0] ?? null)
