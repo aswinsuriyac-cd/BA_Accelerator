@@ -37,8 +37,21 @@ export type GeneratorOutput = {
 
 export type CriticOutput = {
   verdict: 'pass' | 'fail'
+  package_confidence: number
   summary: string
   issues: string[]
+  clarification_questions: string[]
+  revision_instructions: string[]
+  story_reviews: StoryReview[]
+}
+
+export type StoryReview = {
+  us_id: string
+  status: 'pass' | 'needs_clarification' | 'regenerate'
+  confidence: number
+  summary: string
+  issues: string[]
+  clarification_questions: string[]
   revision_instructions: string[]
 }
 

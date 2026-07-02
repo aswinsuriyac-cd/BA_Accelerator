@@ -22,6 +22,7 @@ from app.services.persistence_service import (
     build_persisted_generation,
     build_persisted_review,
     get_export_or_404,
+    get_latest_critic_output,
     get_latest_generator_output,
     get_latest_router_output,
     get_latest_specialist_output,
@@ -410,6 +411,7 @@ async def rework_workflow_from_ba_comments(
     router_output = get_latest_router_output(workflow)
     specialist_output = get_latest_specialist_output(workflow)
     generator_output = get_latest_generator_output(workflow)
+    critic_output = get_latest_critic_output(workflow)
     if router_output is None or specialist_output is None or generator_output is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -423,6 +425,7 @@ async def rework_workflow_from_ba_comments(
             specialist_output,
             generator_output,
             request.comments,
+            existing_critic_output=critic_output,
             max_refine_attempts=workflow.max_refine_attempts,
         )
         review_output = persist_reworked_review(db, workflow, state, request.comments)

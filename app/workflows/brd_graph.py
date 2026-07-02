@@ -105,6 +105,8 @@ def generate_user_story_node(state: WorkflowState) -> dict:
         specialist_output,
         revision_instructions=revision_instructions,
         refine_attempts=refine_attempts,
+        existing_generator_output=state.get("generator_output"),
+        story_revision_requests=critic_output.story_reviews if critic_output else None,
     )
     return {"generator_output": generator_output}
 
@@ -141,6 +143,11 @@ def critic_review_node(state: WorkflowState) -> dict:
         updates["recommended_next_steps"] = ["Submit the reviewed story package to the BA for final approval."]
         return updates
 
+    if critic_requires_clarification(critic_output):
+        updates["review_status"] = "needs_manual_review"
+        updates["recommended_next_steps"] = build_manual_review_steps(critic_output)
+        return updates
+
     refine_attempts = state.get("refine_attempts", 0) + 1
     updates["refine_attempts"] = refine_attempts
 
@@ -153,7 +160,20 @@ def critic_review_node(state: WorkflowState) -> dict:
 
 def build_manual_review_steps(critic_output: CriticOutput) -> list[str]:
     steps = []
-    for instruction in critic_output.revision_instructions[:4]:
+    for review in critic_output.story_reviews:
+        if review.status == "needs_clarification":
+            for question in review.clarification_questions:
+                steps.append(f"{review.us_id}: {question}")
+
+    for question in critic_output.clarification_questions:
+        steps.append(question)
+
+    for review in critic_output.story_reviews:
+        if review.status == "regenerate":
+            for instruction in review.revision_instructions:
+                steps.append(f"{review.us_id}: {instruction}")
+
+    for instruction in critic_output.revision_instructions:
         steps.append(instruction)
 
     if not steps:
@@ -165,6 +185,13 @@ def build_manual_review_steps(critic_output: CriticOutput) -> list[str]:
             ]
         )
     return steps
+
+
+def critic_requires_clarification(critic_output: CriticOutput) -> bool:
+    if critic_output.clarification_questions:
+        return True
+
+    return any(review.status == "needs_clarification" for review in critic_output.story_reviews)
 
 
 def build_review_output(state: WorkflowState) -> WorkflowReviewOutput:
@@ -209,6 +236,9 @@ def decide_after_critic(state: WorkflowState) -> str:
         raise ValueError("Critic output is required for review branching.")
 
     if critic_output.verdict == "pass":
+        return END
+
+    if state.get("review_status") == "needs_manual_review":
         return END
 
     if state.get("refine_attempts", 0) >= state.get("max_refine_attempts", 3):
@@ -318,6 +348,7 @@ def run_rework_for_workflow(
     specialist_output: SpecialistOutput,
     existing_generator_output: GeneratorOutput,
     ba_comments: str,
+    existing_critic_output: CriticOutput | None = None,
     max_refine_attempts: int = 3,
 ) -> WorkflowState:
     """
@@ -334,6 +365,11 @@ def run_rework_for_workflow(
     refine_attempts = 0
     revision_instructions = [f"Address BA review comments: {ba_comments.strip()}"]
     current_generator_output = existing_generator_output
+    story_revision_requests = (
+        [review for review in existing_critic_output.story_reviews if review.status != "pass"]
+        if existing_critic_output is not None
+        else None
+    )
 
     while True:
         current_generator_output = generator_agent.generate(
@@ -344,6 +380,7 @@ def run_rework_for_workflow(
             refine_attempts=refine_attempts,
             existing_generator_output=current_generator_output,
             ba_comments=ba_comments,
+            story_revision_requests=story_revision_requests,
         )
         critic_output = critic_agent.review(raw_text, router_output, specialist_output, current_generator_output)
         critic_history.append(critic_output)
@@ -361,6 +398,22 @@ def run_rework_for_workflow(
                 "max_refine_attempts": max_refine_attempts,
                 "review_status": "pending_ba_review",
                 "recommended_next_steps": ["Submit the reworked story package to the BA for final approval."],
+                "errors": [],
+            }
+
+        if critic_requires_clarification(critic_output):
+            return {
+                "raw_text": raw_text,
+                "target_stage": "review",
+                "router_output": router_output,
+                "specialist_output": specialist_output,
+                "generator_output": current_generator_output,
+                "critic_output": critic_output,
+                "critic_history": critic_history,
+                "refine_attempts": refine_attempts,
+                "max_refine_attempts": max_refine_attempts,
+                "review_status": "needs_manual_review",
+                "recommended_next_steps": build_manual_review_steps(critic_output),
                 "errors": [],
             }
 
@@ -382,3 +435,4 @@ def run_rework_for_workflow(
             }
 
         revision_instructions = critic_output.revision_instructions
+        story_revision_requests = [review for review in critic_output.story_reviews if review.status != "pass"]

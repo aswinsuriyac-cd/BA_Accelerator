@@ -5,10 +5,49 @@ from pydantic import BaseModel, Field
 from app.schemas.generator_schema import GeneratorOutput
 
 
+class StoryReview(BaseModel):
+    us_id: str = Field(
+        ...,
+        description="User story identifier being reviewed, such as US-BRD-001."
+    )
+    status: Literal["pass", "needs_clarification", "regenerate"] = Field(
+        ...,
+        description="Story-level review outcome used for selective rework."
+    )
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Critic confidence that the story is accurate, complete, and actionable."
+    )
+    summary: str = Field(
+        ...,
+        description="Short explanation of the critic's judgment for this story."
+    )
+    issues: List[str] = Field(
+        default_factory=list,
+        description="Story-specific coverage, hallucination, ambiguity, or completeness issues."
+    )
+    clarification_questions: List[str] = Field(
+        default_factory=list,
+        description="Targeted BA clarification questions required before this story can be trusted."
+    )
+    revision_instructions: List[str] = Field(
+        default_factory=list,
+        description="Concrete instructions for selectively regenerating this story."
+    )
+
+
 class CriticOutput(BaseModel):
     verdict: Literal["pass", "fail"] = Field(
         ...,
         description="Whether the generated story package is acceptable for BA review."
+    )
+    package_confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Overall critic confidence in the full generated package."
     )
     summary: str = Field(
         ...,
@@ -18,9 +57,17 @@ class CriticOutput(BaseModel):
         default_factory=list,
         description="Specific coverage, accuracy, ambiguity, or completeness problems."
     )
+    clarification_questions: List[str] = Field(
+        default_factory=list,
+        description="Package-level or aggregated BA clarification questions."
+    )
     revision_instructions: List[str] = Field(
         default_factory=list,
         description="Concrete instructions for the generator to address on the next pass."
+    )
+    story_reviews: List[StoryReview] = Field(
+        default_factory=list,
+        description="Story-by-story critic results used for targeted regeneration."
     )
 
 

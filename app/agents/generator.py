@@ -1,7 +1,8 @@
 from google.genai import types
 
 from app.config import settings
-from app.schemas.generator_schema import GeneratorOutput
+from app.schemas.generator_schema import GeneratorOutput, UserStoryRow
+from app.schemas.review_schema import StoryReview
 from app.schemas.router_schema import RouterOutput
 from app.schemas.specialist_schema import SpecialistOutput
 from app.services.gemini_service import generate_content_with_fallback
@@ -17,6 +18,7 @@ class GeneratorAgent:
         refine_attempts: int = 0,
         existing_generator_output: GeneratorOutput | None = None,
         ba_comments: str | None = None,
+        story_revision_requests: list[StoryReview] | None = None,
     ) -> GeneratorOutput:
         """
         Transform structured requirements into a user story package ready for review.
@@ -25,7 +27,24 @@ class GeneratorAgent:
             raise ValueError("The provided BRD text is empty.")
 
         rework_context = ""
-        if existing_generator_output is not None or ba_comments:
+        targeted_story_ids = [
+            review.us_id for review in (story_revision_requests or []) if review.status != "pass"
+        ]
+
+        if existing_generator_output is not None and targeted_story_ids:
+            rework_context = (
+                "Targeted revision mode:\n"
+                "- Treat this as a revision of the existing story package.\n"
+                "- Keep every story that is not explicitly requested for revision unchanged.\n"
+                f"- Revise only these story IDs: {targeted_story_ids}\n"
+                "- Preserve the existing us_id and serial_number for each revised story unless a split is clearly required.\n"
+                "- Return JSON with the normal top-level fields, but include only the revised story rows in the stories array.\n"
+                "- Do not include unchanged accepted stories in the response.\n"
+                f"BA comments: {ba_comments or 'None'}\n"
+                f"Story review requests:\n{[review.model_dump(mode='json') for review in story_revision_requests or []]}\n"
+                f"Existing story package:\n{existing_generator_output.model_dump_json(indent=2)}\n\n"
+            )
+        elif existing_generator_output is not None or ba_comments:
             rework_context = (
                 "Rework context:\n"
                 "- Treat this as a revision of the existing story package, not a fresh unrelated draft.\n"
@@ -93,4 +112,34 @@ class GeneratorAgent:
         if not response.text:
             raise RuntimeError("Received empty response from Gemini API.")
 
-        return GeneratorOutput.model_validate_json(response.text)
+        output = GeneratorOutput.model_validate_json(response.text)
+
+        if existing_generator_output is not None and targeted_story_ids:
+            return merge_story_packages(existing_generator_output, output)
+
+        return output
+
+
+def merge_story_packages(existing_output: GeneratorOutput, revised_output: GeneratorOutput) -> GeneratorOutput:
+    merged_by_id: dict[str, UserStoryRow] = {
+        story.us_id: story for story in existing_output.stories
+    }
+
+    for story in revised_output.stories:
+        merged_by_id[story.us_id] = story
+
+    merged_stories = sorted(
+        merged_by_id.values(),
+        key=lambda story: (story.serial_number, story.us_id),
+    )
+
+    normalized_stories = [
+        story.model_copy(update={"serial_number": index})
+        for index, story in enumerate(merged_stories, start=1)
+    ]
+
+    return GeneratorOutput(
+        document_title=revised_output.document_title or existing_output.document_title,
+        story_id_prefix=revised_output.story_id_prefix or existing_output.story_id_prefix,
+        stories=normalized_stories,
+    )

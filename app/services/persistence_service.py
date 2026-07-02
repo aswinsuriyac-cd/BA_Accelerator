@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models.workflow import Artifact, Document, ExportedFile, ReviewAttempt, Workflow
 from app.schemas.generator_schema import GeneratorOutput
-from app.schemas.review_schema import WorkflowReviewOutput
+from app.schemas.review_schema import CriticOutput, WorkflowReviewOutput
 from app.schemas.router_schema import RouterOutput
 from app.schemas.specialist_schema import SpecialistOutput
 from app.schemas.workflow_schema import (
@@ -117,6 +117,13 @@ def get_latest_specialist_output(workflow: Workflow) -> SpecialistOutput | None:
     if latest is None:
         return None
     return SpecialistOutput.model_validate_json(latest.content_json)
+
+
+def get_latest_critic_output(workflow: Workflow) -> CriticOutput | None:
+    latest = _latest_artifact(workflow, "critic_output")
+    if latest is None:
+        return None
+    return CriticOutput.model_validate_json(latest.content_json)
 
 
 def persist_reworked_review(db: Session, workflow: Workflow, state: WorkflowState, ba_comments: str) -> WorkflowReviewOutput:
