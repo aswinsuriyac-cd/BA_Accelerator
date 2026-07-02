@@ -8,7 +8,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.generator_schema import GeneratorOutput
+from app.schemas.generator_schema import GeneratorOutput, UserStoryRow
+from app.models.workflow import Artifact
 from app.schemas.review_schema import WorkflowReviewOutput
 from app.schemas.router_schema import RouterOutput
 from app.schemas.specialist_schema import SpecialistOutput
@@ -428,7 +429,7 @@ async def create_export_from_workflow(
 
     base_name = workflow.document.original_filename if workflow.document and workflow.document.original_filename else workflow.id
     payload = build_export_bytes(generator_output, output_format)
-    file_name = f"{Path(base_name).stem}.{output_format}"
+    file_name = f"{_safe_export_basename(Path(base_name).stem)}.{output_format}"
     exported = persist_export_record(
         db,
         workflow,
@@ -443,3 +444,32 @@ async def create_export_from_workflow(
         payload=payload,
         workflow_id=workflow.id,
     )
+
+@router.put("/workflows/{workflow_id}/stories", response_model=GeneratorOutput)
+async def update_workflow_stories(
+    workflow_id: str,
+    stories: list[UserStoryRow],
+    db: Session = Depends(get_db)
+):
+    workflow = get_workflow_or_404(db, workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found.")
+    
+    generator_output = get_latest_generator_output(workflow)
+    if generator_output is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No persisted generator output found for this workflow."
+        )
+        
+    generator_output.stories = stories
+    
+    db.add(
+        Artifact(
+            workflow=workflow,
+            artifact_type="generator_output",
+            content_json=generator_output.model_dump_json(indent=2)
+        )
+    )
+    db.commit()
+    return generator_output

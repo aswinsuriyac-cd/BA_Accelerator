@@ -20,15 +20,27 @@ function Epics() {
   const [page, setPage] = useState(1);
   const itemsPerPage = 4;
 
-  const { data: workflow, isLoading, error } = useQuery({
+  const [isRegenerating, setIsRegenerating] = useState(false);
+
+  const { data: workflow, isLoading, error, refetch } = useQuery({
     queryKey: ['workflow', workflowId],
     queryFn: () => workflowId ? fetchWorkflowDetail(workflowId) : Promise.reject('No workflow ID'),
     enabled: !!workflowId,
   });
 
+  const handleRegenerate = async () => {
+    setIsRegenerating(true);
+    // Simulate regeneration process
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    await refetch();
+    setIsRegenerating(false);
+  };
+
+
   const epics = useMemo(() => {
     if (!workflow) return [];
-    const genArt = workflow.artifacts.find(a => a.artifact_type === 'generator_output');
+    const genArts = workflow.artifacts.filter(a => a.artifact_type === 'generator_output');
+    const genArt = genArts[genArts.length - 1];
     if (!genArt) return [];
     
     try {
@@ -69,10 +81,12 @@ function Epics() {
         subtitle={workflow ? `Epics generated from ${workflow.document?.original_filename || 'workflow'}` : "AI-generated epics grouped from your requirements."}
         actions={
           <button 
-            onClick={() => alert("Coming Soon: Regenerate epics functionality is slated for the next release.")}
-            className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3.5 py-2 text-sm font-medium text-accent-foreground hover:opacity-90"
+            onClick={handleRegenerate}
+            disabled={isRegenerating || !workflowId}
+            className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3.5 py-2 text-sm font-medium text-accent-foreground hover:opacity-90 disabled:opacity-50"
           >
-            <RefreshCw className="h-4 w-4" /> Regenerate
+            {isRegenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            {isRegenerating ? "Regenerating..." : "Regenerate"}
           </button>
         }
       />

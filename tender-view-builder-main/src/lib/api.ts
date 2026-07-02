@@ -5,6 +5,7 @@ import type {
   WorkflowDetail,
   WorkflowReviewOutput,
   WorkflowSummary,
+  UserStoryRow,
 } from './types';
 
 const API_BASE = 'http://localhost:8000';
@@ -127,7 +128,9 @@ async function downloadBlob(response: Response) {
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
+  document.body.appendChild(link);
   link.click();
+  document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
 
@@ -142,4 +145,19 @@ export async function exportFromWorkflow(workflowId: string, format: 'xlsx' | 'd
 export async function downloadSavedExport(workflowId: string, exportId: string) {
   const response = await fetch(endpoint(`/api/v1/analyze/workflows/${workflowId}/exports/${exportId}`));
   await downloadBlob(response);
+}
+
+export async function updateWorkflowStories(workflowId: string, stories: UserStoryRow[]) {
+  const response = await fetch(endpoint(`/api/v1/analyze/workflows/${workflowId}/stories`), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(stories),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to update stories' }));
+    throw new Error(error.detail ?? 'Failed to update stories');
+  }
+
+  return (await response.json()) as GeneratorOutput;
 }

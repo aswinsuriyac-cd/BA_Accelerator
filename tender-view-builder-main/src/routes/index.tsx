@@ -23,6 +23,15 @@ function Dashboard() {
     queryFn: fetchWorkflows,
   });
 
+  const hour = new Date().getHours();
+  let greeting = "Good morning";
+  if (hour >= 12 && hour < 17) {
+    greeting = "Good afternoon";
+  } else if (hour >= 17) {
+    greeting = "Good evening";
+  }
+
+
   const recentActivity = workflows ? workflows.slice(0, 5).map(w => ({
     text: `Workflow created: ${w.id.split('-')[0]}...`,
     time: new Date(w.created_at).toLocaleString()
@@ -43,7 +52,7 @@ function Dashboard() {
   return (
     <>
       <PageHeader
-        title="Good morning, BA User! 👋"
+        title={`${greeting}, BA User! 👋`}
         subtitle="Here's what's happening with your projects."
         actions={
           <Link

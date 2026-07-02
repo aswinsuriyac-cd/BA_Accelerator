@@ -8,12 +8,19 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+import html
 
 from app.schemas.generator_schema import GeneratorOutput, UserStoryRow
+import re
 
 ExportFormat = Literal["xlsx", "docx", "pdf"]
+
+def _clean_text(text: str | None) -> str:
+    if not text:
+        return ""
+    return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', str(text))
 
 EXCEL_HEADERS = [
     "S.no",
@@ -37,18 +44,18 @@ def _block(items: list[str]) -> str:
 
 def _story_row_values(story: UserStoryRow) -> list[str | int]:
     return [
-        story.serial_number,
-        story.epic,
-        story.feature,
-        story.us_id,
-        story.us_summary,
-        story.user_story_description,
-        _block(story.acceptance_criteria),
-        _block(story.business_rules),
-        _block(story.dependencies),
-        story.state,
-        story.comments or "",
-        story.reference_link or "",
+        _clean_text(story.serial_number),
+        _clean_text(story.epic),
+        _clean_text(story.feature),
+        _clean_text(story.us_id),
+        _clean_text(story.us_summary),
+        _clean_text(story.user_story_description),
+        _clean_text(_block(story.acceptance_criteria)),
+        _clean_text(_block(story.business_rules)),
+        _clean_text(_block(story.dependencies)),
+        _clean_text(story.state),
+        _clean_text(story.comments),
+        _clean_text(story.reference_link),
     ]
 
 
@@ -99,43 +106,43 @@ def build_docx_export(output: GeneratorOutput) -> bytes:
     section.left_margin = Inches(0.5)
     section.right_margin = Inches(0.5)
 
-    document.add_heading(output.document_title, level=0)
-    document.add_paragraph(f"Story ID Prefix: {output.story_id_prefix}")
+    document.add_heading(_clean_text(output.document_title), level=0)
+    document.add_paragraph(f"Story ID Prefix: {_clean_text(output.story_id_prefix)}")
     document.add_paragraph(f"Total Stories: {len(output.stories)}")
 
     for story in output.stories:
-        document.add_heading(f"{story.us_id} - {story.us_summary}", level=1)
-        document.add_paragraph(f"Epic: {story.epic}")
-        document.add_paragraph(f"Feature: {story.feature}")
-        document.add_paragraph(f"State: {story.state}")
+        document.add_heading(f"{_clean_text(story.us_id)} - {_clean_text(story.us_summary)}", level=1)
+        document.add_paragraph(f"Epic: {_clean_text(story.epic)}")
+        document.add_paragraph(f"Feature: {_clean_text(story.feature)}")
+        document.add_paragraph(f"State: {_clean_text(story.state)}")
 
         story_heading = document.add_paragraph()
         story_heading.add_run("User Story Description: ").bold = True
-        story_heading.add_run(story.user_story_description)
+        story_heading.add_run(_clean_text(story.user_story_description))
 
         document.add_paragraph("Acceptance Criteria", style="Heading 2")
         for item in story.acceptance_criteria:
-            document.add_paragraph(item, style="List Bullet")
+            document.add_paragraph(_clean_text(item), style="List Bullet")
 
         if story.business_rules:
             document.add_paragraph("Business Rules", style="Heading 2")
             for item in story.business_rules:
-                document.add_paragraph(item, style="List Bullet")
+                document.add_paragraph(_clean_text(item), style="List Bullet")
 
         if story.dependencies:
             document.add_paragraph("Dependencies", style="Heading 2")
             for item in story.dependencies:
-                document.add_paragraph(item, style="List Bullet")
+                document.add_paragraph(_clean_text(item), style="List Bullet")
 
         if story.comments:
             comment_paragraph = document.add_paragraph()
             comment_paragraph.add_run("Comments: ").bold = True
-            comment_paragraph.add_run(story.comments)
+            comment_paragraph.add_run(_clean_text(story.comments))
 
         if story.reference_link:
             reference_paragraph = document.add_paragraph()
             reference_paragraph.add_run("Reference Link: ").bold = True
-            reference_paragraph.add_run(story.reference_link)
+            reference_paragraph.add_run(_clean_text(story.reference_link))
 
     buffer = BytesIO()
     document.save(buffer)
@@ -154,15 +161,17 @@ def build_pdf_export(output: GeneratorOutput) -> bytes:
         bottomMargin=24,
     )
 
+    cell_style = ParagraphStyle('TableCell', parent=styles['Normal'], fontSize=8, leading=10)
+
     story_table_rows = [["US ID", "Summary", "Epic / Feature", "Story", "Acceptance Criteria"]]
     for story in output.stories:
         story_table_rows.append(
             [
-                story.us_id,
-                story.us_summary,
-                f"{story.epic}\n{story.feature}",
-                story.user_story_description,
-                _block(story.acceptance_criteria),
+                Paragraph(html.escape(story.us_id), cell_style),
+                Paragraph(html.escape(story.us_summary), cell_style),
+                Paragraph(f"{html.escape(story.epic)}<br/>{html.escape(story.feature)}", cell_style),
+                Paragraph(html.escape(story.user_story_description), cell_style),
+                Paragraph(html.escape(_block(story.acceptance_criteria)).replace('\n', '<br/>'), cell_style),
             ]
         )
 

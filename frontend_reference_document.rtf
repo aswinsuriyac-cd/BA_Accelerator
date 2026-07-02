@@ -1,0 +1,43 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Calibri;}}
+{\colortbl ;\red0\green0\blue0;}
+\viewkind4\uc1\pard\sa200\sl276\slmult1\f0\fs24
+\b Frontend Reference Document\b0\par
+\pard This document summarizes the frontend part of the BRD Accelerator project, including its features, functionalities, and technology stack.\par
+\pard\par
+\b 1. Overview\b0\par
+The frontend is the user-facing part of the BRD Accelerator application. It provides an interactive workflow for uploading business requirements documents, reviewing extracted requirements, managing user stories, validating outputs, and exporting results.\par
+\pard\par
+\b 2. Frontend Functionalities\b0\par
+\pard\li720\fi-720\bullet\tx720 Dashboard: Displays summary cards for projects, epics, stories, quality score, and coverage.\par
+\pard\li720\fi-720\bullet\tx720 BRD Upload: Supports drag-and-drop upload and file browsing for common document formats.\par
+\pard\li720\fi-720\bullet\tx720 Project Management: Shows workflows/projects with search and pagination.\par
+\pard\li720\fi-720\bullet\tx720 Requirements Review: Allows viewing, filtering, editing, and approving requirements.\par
+\pard\li720\fi-720\bullet\tx720 Epic Generation: Groups generated stories into epics with search and pagination.\par
+\pard\li720\fi-720\bullet\tx720 User Stories Management: Supports table and board view for managing stories.\par
+\pard\li720\fi-720\bullet\tx720 Story Details and Review: Displays detailed story information, acceptance criteria, and business rules.\par
+\pard\li720\fi-720\bullet\tx720 Validation / QA: Shows validation score, issues, and recommendations.\par
+\pard\li720\fi-720\bullet\tx720 Export: Supports exporting in PDF, Word, and Excel formats.\par
+\pard\par
+\b 3. Tech Stack Used\b0\par
+Frontend Core: React, TypeScript\par
+Build Tool: Vite\par
+Routing: TanStack Router, TanStack Start\par
+State/Data Fetching: React Query\par
+Styling: Tailwind CSS\par
+UI Libraries: Radix UI, shadcn-style component structure\par
+Forms and Validation: React Hook Form, Zod\par
+Icons and Visualization: Lucide React, Recharts\par
+Utilities: clsx, tailwind-merge, date-fns\par
+\pard\par
+\b 4. Where These Technologies Are Used\b0\par
+React and TypeScript are used across the route pages and UI components.\par
+TanStack Router is used in the router setup and route definitions.\par
+React Query is used for fetching workflow data in the pages.\par
+Tailwind CSS is used for styling the app layout and pages.\par
+Radix UI components are used in the UI component library.\par
+API communication is handled in the API utility file.\par
+\pard\par
+\b 5. Summary\b0\par
+The frontend is built as a modern, interactive workflow application that helps users move from uploaded BRD content to structured requirements, epics, user stories, validation, and export.\par
+}

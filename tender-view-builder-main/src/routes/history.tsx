@@ -27,7 +27,8 @@ function HistoryPage() {
   let allStoryIds: string[] = [];
 
   if (workflow) {
-    const genArt = workflow.artifacts.find(a => a.artifact_type === 'generator_output');
+    const genArts = workflow.artifacts.filter(a => a.artifact_type === 'generator_output');
+    const genArt = genArts[genArts.length - 1];
     if (genArt) {
       try {
         const gen = JSON.parse(genArt.content_json) as GeneratorOutput;
@@ -81,7 +82,7 @@ function HistoryPage() {
                 >
                   <ChevronRight className="h-4 w-4" />
                 </button>
-                <button onClick={() => alert("Coming soon: Full view is slated for the next release.")} className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm text-accent-foreground hover:opacity-90">
+                <button onClick={() => window.open(window.location.href, '_blank')} className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm text-accent-foreground hover:opacity-90">
                   Open in Full View <ExternalLink className="h-3.5 w-3.5" />
                 </button>
               </div>

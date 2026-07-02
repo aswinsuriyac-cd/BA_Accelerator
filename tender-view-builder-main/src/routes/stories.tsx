@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { PageHeader, StatusBadge } from "@/components/page-shell";
 import { Filter, LayoutGrid, Table as TableIcon, Plus, Eye, Pencil, Loader2, Search, Save } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchWorkflowDetail } from "@/lib/api";
+import { fetchWorkflowDetail, updateWorkflowStories } from "@/lib/api";
 import type { GeneratorOutput, UserStoryRow } from "@/lib/types";
 import { useState, useEffect, useMemo } from "react";
 import {
@@ -27,8 +27,9 @@ function Stories() {
   const [stories, setStories] = useState<UserStoryRow[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<"table" | "board">("table");
-  const [activeModal, setActiveModal] = useState<{ type: 'edit', story: UserStoryRow } | null>(null);
-  const [editForm, setEditForm] = useState({ summary: '', state: '' });
+  const [activeModal, setActiveModal] = useState<{ type: 'edit' | 'add', story?: UserStoryRow } | null>(null);
+  const [editForm, setEditForm] = useState({ summary: '', state: '', epic: '', description: '' });
+  const [isSaving, setIsSaving] = useState(false);
   const [page, setPage] = useState(1);
   const itemsPerPage = 15;
 
@@ -40,7 +41,8 @@ function Stories() {
 
   useEffect(() => {
     if (workflow) {
-      const generatorArtifact = workflow.artifacts.find(a => a.artifact_type === 'generator_output');
+      const generatorArtifacts = workflow.artifacts.filter(a => a.artifact_type === 'generator_output');
+      const generatorArtifact = generatorArtifacts[generatorArtifacts.length - 1];
       if (generatorArtifact) {
         try {
           const output = JSON.parse(generatorArtifact.content_json) as GeneratorOutput;
@@ -63,13 +65,45 @@ function Stories() {
   const totalPages = Math.max(1, Math.ceil(filteredStories.length / itemsPerPage));
   const rows = filteredStories.slice((page - 1) * itemsPerPage, page * itemsPerPage);
   
-  const handleSaveEdit = () => {
-    if (!activeModal) return;
-    setStories(stories.map(s => s.us_id === activeModal.story.us_id ? { ...s, us_summary: editForm.summary, state: editForm.state as any } : s));
-    setActiveModal(null);
+  const handleSaveModal = async () => {
+    if (!workflowId) return;
+    setIsSaving(true);
+    try {
+      let newStories = [...stories];
+      if (activeModal?.type === 'edit' && activeModal.story) {
+        newStories = stories.map(s => 
+          s.us_id === activeModal.story!.us_id 
+            ? { ...s, us_summary: editForm.summary, state: editForm.state as any, epic: editForm.epic, user_story_description: editForm.description } 
+            : s
+        );
+      } else if (activeModal?.type === 'add') {
+        const timestamp = Date.now().toString().slice(-4);
+        const newStory: UserStoryRow = {
+          serial_number: stories.length + 1,
+          us_id: `US-CUST-${timestamp}`,
+          epic: editForm.epic || 'Custom Epic',
+          feature: 'Custom Feature',
+          us_summary: editForm.summary,
+          user_story_description: editForm.description,
+          acceptance_criteria: [],
+          business_rules: [],
+          dependencies: [],
+          state: editForm.state || 'Draft',
+          comments: '',
+          reference_link: ''
+        };
+        newStories.push(newStory);
+      }
+      
+      await updateWorkflowStories(workflowId, newStories);
+      setStories(newStories);
+      setActiveModal(null);
+    } catch (err) {
+      alert("Failed to save story");
+    } finally {
+      setIsSaving(false);
+    }
   };
-  
-  const comingSoon = (feature: string) => alert(`Coming Soon: ${feature} is slated for the next release.`);
 
   return (
     <>
@@ -90,7 +124,15 @@ function Stories() {
             >
               <TableIcon className="h-4 w-4" /> Table
             </button>
-            <button onClick={() => comingSoon("Add Custom Story")} className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3.5 py-2 text-sm font-medium text-accent-foreground hover:opacity-90"><Plus className="h-4 w-4" /> Add Story</button>
+            <button 
+              onClick={() => {
+                setEditForm({ summary: '', state: 'Draft', epic: '', description: '' });
+                setActiveModal({ type: 'add' });
+              }} 
+              className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3.5 py-2 text-sm font-medium text-accent-foreground hover:opacity-90"
+            >
+              <Plus className="h-4 w-4" /> Add Story
+            </button>
           </>
         }
       />
@@ -163,7 +205,12 @@ function Stories() {
                               ><Eye className="h-4 w-4" /></button>
                               <button 
                                 onClick={() => {
-                                  setEditForm({ summary: r.us_summary, state: r.state || 'Generated' });
+                                  setEditForm({ 
+                                    summary: r.us_summary, 
+                                    state: r.state || 'Generated',
+                                    epic: r.epic,
+                                    description: r.user_story_description
+                                  });
                                   setActiveModal({ type: 'edit', story: r });
                                 }} 
                                 className="hover:text-foreground" 
@@ -220,7 +267,12 @@ function Stories() {
                               <div className="flex gap-2">
                                 <button onClick={() => navigate({ to: '/history', search: { workflowId, usId: s.us_id }})} className="hover:text-foreground"><Eye className="h-3.5 w-3.5" /></button>
                                 <button onClick={() => {
-                                  setEditForm({ summary: s.us_summary, state: s.state || 'Generated' });
+                                  setEditForm({ 
+                                    summary: s.us_summary, 
+                                    state: s.state || 'Generated',
+                                    epic: s.epic,
+                                    description: s.user_story_description
+                                  });
                                   setActiveModal({ type: 'edit', story: s });
                                 }} className="hover:text-foreground"><Pencil className="h-3.5 w-3.5" /></button>
                               </div>
@@ -245,15 +297,33 @@ function Stories() {
       <Dialog open={!!activeModal} onOpenChange={(open) => !open && setActiveModal(null)}>
         <DialogContent className="max-w-md bg-card text-card-foreground border border-border">
           <DialogHeader>
-            <DialogTitle>Edit Story: {activeModal?.story.us_id}</DialogTitle>
+            <DialogTitle>{activeModal?.type === 'edit' ? `Edit Story: ${activeModal?.story?.us_id}` : 'Add New Story'}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-4 max-h-[70vh] overflow-y-auto">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">Epic</label>
+              <input 
+                value={editForm.epic}
+                onChange={(e) => setEditForm(prev => ({ ...prev, epic: e.target.value }))}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:border-ring outline-none"
+                placeholder="Epic name"
+              />
+            </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-muted-foreground">Summary</label>
               <textarea 
                 value={editForm.summary}
                 onChange={(e) => setEditForm(prev => ({ ...prev, summary: e.target.value }))}
+                className="w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-sm focus:border-ring outline-none"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">Description</label>
+              <textarea 
+                value={editForm.description}
+                onChange={(e) => setEditForm(prev => ({ ...prev, description: e.target.value }))}
                 className="w-full min-h-[100px] rounded-md border border-input bg-background px-3 py-2 text-sm focus:border-ring outline-none"
+                placeholder="I want to... so that..."
               />
             </div>
             <div className="space-y-2">
@@ -263,6 +333,7 @@ function Stories() {
                 onChange={(e) => setEditForm(prev => ({ ...prev, state: e.target.value }))}
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:border-ring outline-none"
               >
+                <option value="Draft">Draft</option>
                 <option value="Generated">Generated</option>
                 <option value="Refined">Refined</option>
                 <option value="Approved">Approved</option>
@@ -277,10 +348,12 @@ function Stories() {
               Cancel
             </button>
             <button
-              onClick={handleSaveEdit}
-              className="px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-2"
+              onClick={handleSaveModal}
+              disabled={isSaving}
+              className="px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-2 disabled:opacity-50"
             >
-              <Save className="h-4 w-4" /> Save
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} 
+              {isSaving ? "Saving..." : "Save"}
             </button>
           </DialogFooter>
         </DialogContent>
